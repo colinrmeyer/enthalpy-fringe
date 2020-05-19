@@ -11,7 +11,7 @@ class meshinformation():
         # domain from from z=l to z=r
         self.l = 0 # nondimensional bottom
         self.r = 1 # nondimensional top
-        self.N = (2**3)*(self.r-self.l) # Number of grid cells
+        self.N = (2**5)*(self.r-self.l) # Number of grid cells
         self.dy = (self.r-self.l)/self.N # grid cell width
         self.yedges = np.linspace(self.l,self.r,self.N+1) # cell edges
         self.y = (self.yedges[:self.N]+self.yedges[-self.N:])/2 # cell centers
@@ -85,45 +85,26 @@ def enthalpy2temperature(H,N,phi,S,beta):
     return T
 
 @jit(nopython=True)
-def Vintegrals(theta,heave,alpha,beta,G,nu,phi,y,dy,EffP):
-    S = 1-((1+heave*theta)**(-beta))
-    k = (1+heave*theta)**alpha
-    # It1 = G*(nu-1)*(1-phi)*(y[heave][-1]-y[heave][0])
-    It1 = G*(nu-1)*(1-phi)*(y[heave][-1]-y[~heave][-1])
-    It2 = (1-phi)*theta[-1] + (phi/(1-beta))*(((1+theta[-1])**(1-beta))-1)
-    Ib = np.sum((((1-phi*S)**2)/k)*dy*heave)
-    return (1-EffP+It1+It2)/Ib
-
-# @jit(nopython=True)
-# def flux(enthalpy,dy,N,Pe,phi,Q,S,alpha,beta,G,nu,y,EffP):
-#     theta = enthalpy2temperature(enthalpy,N,phi,S,beta)
-#     velocity = Pe*Vintegrals(theta,theta>=0,alpha,beta,G,nu,phi,y,dy,EffP)
-#     if velocity > 0:
-#         afp = enthalpy # advective flux +
-#         afm = np.append(enthalpy[0],enthalpy[:-1]) # advective flux -
-#     elif velocity < 0:
-#         afp = np.append(enthalpy[1:],enthalpy[-1]) # advective flux +
-#         afm = enthalpy # advective flux -
-#     else:
-#         afp = np.zeros(N) # advective flux +
-#         afm = np.zeros(N) # advective flux -
-        
-#     k = np.ones(N)
-#     kp = np.append(k[1:],k[-1])
-#     km = np.append(k[0],k[:-1])
-#     thetap = np.append(theta[1:],theta[-1])
-#     thetam = np.append(theta[0],theta[:-1])
-#     dfp = (2/dy)*((kp*k)/(kp+k))*(thetap-theta)
-#     dfm = (2/dy)*((k*km)/(k+km))*(theta-thetam)
-#     heaving = enthalpy<=phi
-#     fp = velocity*afp*heaving+dfp
-#     fm = velocity*afm*heaving+dfm
-#     fm[0]=1
-#     fp[-1]= Q
-#     return (fp-fm)/dy
+def Sfun(T,beta):
+    return 1-((1+(T>0)*T)**(-beta))
 
 @jit(nopython=True)
-def forwardeuler(ye,dt,Nt,dy,N,Pe,porosity,Q,S,alpha,beta,G,nu,y,EffP):
+def kfun(T,alpha):
+    return (1+(T>0)*T)**alpha
+
+@jit(nopython=True)
+def Kfun(T,Ks,Ki,Kw,K,phi,beta,alpha):
+    return (Ks**(1-phi))*(Ki**(phi*Sfun(T,beta)))*(Kw**((1-Sfun(T,beta))*phi))/K
+
+@jit(nopython=True)
+def Vintegrals(theta,heave,alpha,beta,G,nu,phi,y,dy,EffP):
+    It1 = G*(nu-1)*(1-phi)*(y[heave][-1]-y[~heave][-1])
+    It2 = (1-phi)*theta[-1] + (phi/(1-beta))*(((1+theta[-1])**(1-beta))-1)
+    Ib = np.sum((((1-phi*Sfun(theta,beta))**2)/kfun(theta,alpha))*dy*heave)
+    return (1-EffP+It1+It2)/Ib
+
+@jit(nopython=True)
+def forwardeuler(ye,dt,Nt,dy,N,Pe,porosity,Q,S,alpha,beta,G,nu,y,EffP,Ks,Ki,Kw,K):
     for i in range(Nt):
         theta = enthalpy2temperature(ye,N,porosity,S,beta)
         velocity = Pe*Vintegrals(theta,theta>=0,alpha,beta,G,nu,porosity,y,dy,EffP)
@@ -137,13 +118,13 @@ def forwardeuler(ye,dt,Nt,dy,N,Pe,porosity,Q,S,alpha,beta,G,nu,y,EffP):
             afp = np.zeros(N) # advective flux +
             afm = np.zeros(N) # advective flux -
         
-        k = np.ones(N)
-        kp = np.append(k[1:],k[-1])
-        km = np.append(k[0],k[:-1])
+        Kc = Kfun(theta,Ks,Ki,Kw,K,porosity,beta,alpha) # center
+        Kp = np.append(Kc[1:],Kc[-1]) # positive
+        Km = np.append(Kc[0],Kc[:-1]) # minus
         thetap = np.append(theta[1:],theta[-1])
         thetam = np.append(theta[0],theta[:-1])
-        dfp = (2/dy)*((kp*k)/(kp+k))*(thetap-theta)
-        dfm = (2/dy)*((k*km)/(k+km))*(theta-thetam)
+        dfp = (2/dy)*((Kp*Kc)/(Kp+Kc))*(thetap-theta)
+        dfm = (2/dy)*((Kc*Km)/(Kc+Km))*(theta-thetam)
         heaving = ye<=porosity
         fp = velocity*afp*heaving+dfp
         fm = velocity*afm*heaving+dfm
@@ -160,15 +141,15 @@ if __name__ == "__main__":
     bracket = scales()
     nd = nondimensional()
     # # timestep # #
-    D = nd.S/prms.phi # diffusivity
-    dt = (1/(2.1*D))*(mesh.dy**2) # timestep
+    D = ((prms.Ks**(1-prms.phi))*(prms.Ki**prms.phi))*nd.S/prms.phi # diffusivity
+    dt = (1/(2.01*D))*(mesh.dy**2) # timestep
     Nt = int(np.round(mesh.TotalTime/dt)) # number of timesteps
     
     # # initial temperature profile # #
     enthalpy = 0.36-0.04*mesh.y 
     start = time.time()
-    esol = forwardeuler(enthalpy,dt,Nt,mesh.dy,mesh.N,nd.Pe,prms.phi,nd.Qout,nd.S,prms.alpha,prms.beta,nd.G,nd.nu,mesh.y,nd.EffP)
-    np.savetxt('esol.txt', (mesh.y,esol))
+    esol = forwardeuler(enthalpy,dt,Nt,mesh.dy,mesh.N,nd.Pe,prms.phi,nd.Qout,nd.S,prms.alpha,prms.beta,nd.G,nd.nu,mesh.y,nd.EffP,prms.Ks,prms.Ki,prms.Kw,bracket.K)
+    np.savetxt('esol_varyK.txt', (mesh.y,esol))
     end = time.time()
     print("Elapsed FE (with compilation) = %s" % (end - start))
    
@@ -186,23 +167,21 @@ if __name__ == "__main__":
     print(100*abs((V-nd.V)/nd.V)) # percent error in V
     
     def ffintegral(zf): 
-        tp = lambda t,x: nd.Qout + (1-nd.Qout)/((1+x)**prms.beta)
+        tp = lambda t,x: (nd.Qout + ((1-nd.Qout)/((1+x)**prms.beta)))/Kfun(x,prms.Ks,prms.Ki,prms.Kw,bracket.K,prms.phi,prms.beta,prms.alpha)
         sol = solve_ivp(tp,[zf,1],[0],method='LSODA',dense_output=True)
         theta = lambda z: sol.sol(z)
-        S = lambda x: 1-((1+theta(x))**(-prms.beta))
-        k = lambda x: (1+theta(x))**prms.alpha
         It1 = nd.G*(nd.nu-1)*(1-prms.phi)*(1-zf)
         It2 = (1-prms.phi)*theta(1) + (prms.phi/(1-prms.beta))*(((1+theta(1))**(1-prms.beta))-1)
-        Ib = quad(lambda x: ((1-prms.phi*S(x))**2)/k(x),zf,1)
+        Ib = quad(lambda x: ((1-prms.phi*Sfun(theta(x),prms.beta))**2)/kfun(theta(x),prms.alpha),zf,1)
         return (1-nd.EffP+It1+It2)/Ib[0]
     
     zf = fsolve(lambda x: ffintegral(x)-nd.V,0.48)
-    tp = lambda t,x: nd.Qout + (1-nd.Qout)/((1+x)**prms.beta)
+    tp = lambda t,x: (nd.Qout + ((1-nd.Qout)/((1+x)**prms.beta)))/Kfun(x,prms.Ks,prms.Ki,prms.Kw,bracket.K,prms.phi,prms.beta,prms.alpha)
     sol = solve_ivp(tp,[zf,1],[0],method='LSODA',dense_output=True)
     esol_analytical = prms.phi*((1+sol.y.T)**(-prms.beta))
     plt.plot(esol_analytical/prms.phi,sol.t,'r')
     z_lower = np.linspace(0,zf,100)
     esol_lower = -(prms.phi/nd.S)*(z_lower-zf)+prms.phi
     plt.plot(esol_lower/prms.phi,z_lower,'r')
-    f.savefig("enthalpyheight.pdf")
+    f.savefig("enthalpyheight_varyK.pdf")
     plt.show()
