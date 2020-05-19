@@ -94,34 +94,6 @@ def Vintegrals(theta,heave,alpha,beta,G,nu,phi,y,dy,EffP):
     Ib = np.sum((((1-phi*S)**2)/k)*dy*heave)
     return (1-EffP+It1+It2)/Ib
 
-# @jit(nopython=True)
-# def flux(enthalpy,dy,N,Pe,phi,Q,S,alpha,beta,G,nu,y,EffP):
-#     theta = enthalpy2temperature(enthalpy,N,phi,S,beta)
-#     velocity = Pe*Vintegrals(theta,theta>=0,alpha,beta,G,nu,phi,y,dy,EffP)
-#     if velocity > 0:
-#         afp = enthalpy # advective flux +
-#         afm = np.append(enthalpy[0],enthalpy[:-1]) # advective flux -
-#     elif velocity < 0:
-#         afp = np.append(enthalpy[1:],enthalpy[-1]) # advective flux +
-#         afm = enthalpy # advective flux -
-#     else:
-#         afp = np.zeros(N) # advective flux +
-#         afm = np.zeros(N) # advective flux -
-        
-#     k = np.ones(N)
-#     kp = np.append(k[1:],k[-1])
-#     km = np.append(k[0],k[:-1])
-#     thetap = np.append(theta[1:],theta[-1])
-#     thetam = np.append(theta[0],theta[:-1])
-#     dfp = (2/dy)*((kp*k)/(kp+k))*(thetap-theta)
-#     dfm = (2/dy)*((k*km)/(k+km))*(theta-thetam)
-#     heaving = enthalpy<=phi
-#     fp = velocity*afp*heaving+dfp
-#     fm = velocity*afm*heaving+dfm
-#     fm[0]=1
-#     fp[-1]= Q
-#     return (fp-fm)/dy
-
 @jit(nopython=True)
 def forwardeuler(ye,dt,Nt,dy,N,Pe,porosity,Q,S,alpha,beta,G,nu,y,EffP):
     for i in range(Nt):
