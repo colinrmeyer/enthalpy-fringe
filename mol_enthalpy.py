@@ -142,7 +142,7 @@ def enthalpyode(time,ye,N,y,dy,phi,Stefan,alpha,beta,G,nu,EffP,Pe,V):
         return -((fp-fm)/dy)
         
 if __name__ == "__main__":
-    effectivepressure = 100*1000 # kPa 
+    effectivepressure = 100*1000 # Pa 
     Vheaverate = 0 # m/s
     
     mesh = meshinformation()
