@@ -1,2 +1,2 @@
 # enthalpy-fringe
-An enthalpy model for frozen fringe connected to the arXiv preprint: https://doi.org/10.48550/arXiv.2109.12182. 
+An enthalpy model for frozen fringe connected to Meyer et al. (2023): https://doi.org/10.1017/jfm.2023.366. 
